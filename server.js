@@ -43,6 +43,24 @@ router.get('/populate', function (req, res, next) {
     }
 })
 
+router.get('/car',function (req, res,next) {
+        var query = {
+            "sort": [
+                {
+                    "volume": { "order": "desc" }
+                }
+            ]
+        }
+
+        client.search({
+            index: "models",
+            type: "model",
+            body: query
+        }, (err, resp) => {
+            res.send(resp)
+        });
+    })
+
 app.listen(9292, 'localhost', function () {
     console.log("connected");
 });
