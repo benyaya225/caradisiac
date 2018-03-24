@@ -13,35 +13,69 @@ var client = new elasticsearch.Client({
   host: 'localhost:9200',
   log: 'trace'
 });
+const { getBrands } = require('node-car-api');
+const { getModels } = require('node-car-api');
 
 
-async function getModel() {
 
-    const brands = await getBrands();
-    brands.forEach(async brand => {
-        var bulkFile = [];
-        const models = await getModels(brand);
-        models.forEach(model => {
-            var line = { brand: model.brand, model: model.model, volume: model.volume, uuid: model.uuid, name: model.name };
-            var index = { index: { _index: 'models', _type: 'model', _id: model.uuid } };
-            bulkFile.push(index);
-            bulkFile.push(line);
-        });
-        //console.log(bulk);
-    
-        client.bulk({
-            body: bulkFile
-        }, function (error, response) {
-            if (error) {
-                console.error(error);
-                return;
-            }
-            else {
-                console.log("i" + response);
-            }
-        });
-
+function Brands() {
+    return new Promise((resolve, reject) => {
+        getBrands()
+            .then((brands) => {
+                return resolve(brands);
+            })
+            .catch((err) => { return resolve("ERR") })
     })
 }
 
-getModel();
+function Models(brand) {
+    return new Promise((resolve, reject) => {
+        getModels(brand)
+            .then((models) => { resolve(models) })
+            .catch((err) => { resolve("ERR") })
+    })
+}
+
+var brands = ["PEUGEOT", "DACIA",];
+    const requests = brands.map(brand => Models(brand))
+    Promise.all(requests)
+        .then(results => {
+            var models = [].concat.apply([], results)
+            var fileToBulk = [];
+            models.forEach(model => {
+                if (model != "ERR") {
+                    fileToBulk.push({ index: { _index: 'models', _type: 'model', _id: model.uuid } })
+                    fileToBulk.push(model)
+                }
+            });
+            client.bulk({
+                body: fileToBulk
+            }, (err, resp) => {
+                if (err) res.send(err)
+                else {
+                    client.indices.putMapping({
+                        index: "models",
+                        type: "model",
+                        body: {
+                            "properties": {
+                                "volume": {
+                                    "type": "text",
+                                    "fielddata": true
+                                }
+                            }
+                        }
+                    }).then((result) => {
+                        res.send(resp);
+                    })
+                        .catch((err) => {
+                            console.log(err)
+                            res.send(err)
+                        })
+
+                }
+            })
+        })
+        .catch(err => {
+            console.log("Error in promise all")
+            console.log(err)
+        })
