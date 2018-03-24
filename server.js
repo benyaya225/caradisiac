@@ -1,68 +1,98 @@
 const express = require('express');
-const bodyParser = require('body-parser');
 var elasticsearch = require('elasticsearch');
 var client = new elasticsearch.Client({
-    hosts: 'https://localhost:9200',
+    hosts: ['https://localhost:9200'],
     log: 'trace'
 });
 const { getBrands } = require('node-car-api');
 const { getModels } = require('node-car-api');
 
-const app = express();
-var router = express.Router();
+var app = express();
 
-
-router.get('/populate', function (req, res, next) {
-    async function getModel() {
-
-        const brands = await getBrands();
-        brands.forEach(async brand => {
-            var bulkFile = [];
-            const models = await getModels(brand);
-            models.forEach(model => {
-                var line = { brand: model.brand, model: model.model, volume: model.volume, uuid: model.uuid, name: model.name };
-                var index = { index: { _index: 'models', _type: 'model', _id: model.uuid } };
-                bulkFile.push(index);
-                bulkFile.push(line);
-            });
-            //console.log(bulk);
-        
-            client.bulk({
-                body: bulkFile
-            }, function (error, response) {
-                if (error) {
-                    console.error(error);
-                    return;
-                }
-                else {
-                    console.log("i" + response);
-                }
-            });
-
+function Brands() {
+    return new Promise((resolve,reject)=>{
+        getBrands()
+        .then((brands)=>{
+            return resolve(brands);
         })
-    }
-})
+        .catch((err)=>{return resolve("ERR")})
+    })
+}
 
-router.get('/car',function (req, res,next) {
-        var query = {
-            "sort": [
-                {
-                    "volume": { "order": "desc" }
-                }
-            ]
-        }
+function Models(brand) {
+    return new Promise((resolve,reject)=>{
+        getModels(brand)
+        .then((models)=>{resolve(models)})
+        .catch((err) => {resolve("ERR")})
+    })
+}
 
+app.route("/populate").get(function (req, res) { 
+                var brands = ["PEUGEOT","DACIA",];
+                const requests = brands.map(brand => Models(brand))
+                Promise.all(requests)
+                    .then(results => {
+                        var models = [].concat.apply([], results)
+                        var fileToBulk = [];
+                        models.forEach(model => {
+                            if (model != "ERR") {
+                                fileToBulk.push({ index: { _index: 'models', _type: 'model', _id: model.uuid } })
+                                fileToBulk.push(model)
+                            }
+                        });
+                        client.bulk({
+                            body: fileToBulk
+                        }, (err, resp) => {
+                            if (err) res.send(err)
+                            else {
+                                client.indices.putMapping({
+                                    index: "models",
+                                    type: "model",
+                                    body: {
+                                        "properties": {
+                                            "volume": {
+                                                "type": "text",
+                                                "fielddata": true
+                                            }
+                                        }
+                                    }
+                                }).then((result) => {
+                                    res.send(resp);
+                                })
+                                    .catch((err) => {
+                                        console.log(err)
+                                        res.send(err)
+                                    })
+
+                            }
+                        })
+                    })
+                    .catch(err => {
+                        console.log("Error in promise all")
+                        console.log(err)
+                    })
+    })
+
+
+    app.route("/cars").get(function (req, res) {
+        
         client.search({
             index: "models",
             type: "model",
-            body: query
+            body: {
+                "sort": [
+                    {
+                        "volume": { "order": "desc" }
+                    }
+                ]
+            }
         }, (err, resp) => {
             res.send(resp)
         });
     })
 
-app.listen(9292, 'localhost', function () {
-    console.log("connected");
-});
 
 
+    app.listen(9292, 'localhost', function () {
+        console.log("Connected");
+    });
